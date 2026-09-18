@@ -113,18 +113,5 @@ avoiding the shared write entirely until the very end.
 
 ---
 
-## Publishing to Git
 
-This folder is ready to become the class Git repo. From this directory:
 
-```bash
-git init
-git add .
-git commit -m "Monte Carlo pi: race condition, sync trap, lock-free reduction"
-git branch -M main
-git remote add origin <YOUR_NEW_REPO_URL>   # create an empty repo on GitHub/GitLab first
-git push -u origin main
-```
-
-Then share repo access with **@sufyanism** (Settings → Collaborators on
-GitHub, or Members on GitLab) before class end-time.
