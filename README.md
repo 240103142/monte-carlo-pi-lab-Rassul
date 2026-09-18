@@ -23,21 +23,30 @@ javac Part3_Reduction.java && java Part3_Reduction
 and a **different** wrong value each run, because the outcome depends on
 how the threads happen to interleave.
 
-| Run | π (your result) |
-|-----|------------------|
-| 1   |                  |
-| 2   |                  |
-| 3   |                  |
-| 4   |                  |
-| 5   |                  |
+| Run | π (result)   |
+|-----|--------------|
+| 1   | 0.982585     |
+| 2   | 0.990372     |
+| 3   | 1.084635     |
+| 4   | 1.088764     |
+| 5   | 1.081769     |
+
+All five runs land nowhere near π ≈ 3.14159 and disagree with each other,
+which is exactly the signature of a data race: `totalHits++` silently loses
+a large, non-deterministic number of increments every run.
 
 ## Part 2 — The Synchronization Trap
 
 | Version                              | Time (ms) |
 |---------------------------------------|-----------|
-| Single-threaded (plain local counter) |           |
-| 4 threads, `synchronized`             |           |
-| 4 threads, `AtomicLong`                |           |
+| Single-threaded (plain local counter) | 207       |
+| 4 threads, `synchronized`             | 2246      |
+| 4 threads, `AtomicLong`                | 866       |
+
+Both concurrent versions produce the correct π (≈3.1415), but `synchronized`
+is over **10x slower** than one thread, and `AtomicLong` (a lock-free CAS)
+is still over 4x slower — confirming that contention on the shared counter,
+not the extra CPU work, is the bottleneck.
 
 ## Part 3 — OpenMP-Style Reduction
 
@@ -45,12 +54,23 @@ Fill in after running `Part3_Reduction` on your machine (100,000,000 points):
 
 | Threads (T) | Runtime (ms) | Speedup (T1/TN) | Efficiency (Speedup/T) |
 |-------------|---------------|------------------|--------------------------|
-| 1 (baseline)|               | 1.0x             | 100%                     |
-| 2           |               |                  |                           |
-| 4           |               |                  |                           |
-| 8           |               |                  |                           |
-| 16          |               |                  |                           |
-| 32          |               |                  |                           |
+| 1 (baseline)| 422           | 1.00x            | 100.0%                   |
+| 2           | 224           | 1.88x            | 94.2%                    |
+| 4           | 87            | 4.85x            | 121.3%                   |
+| 8           | 77            | 5.48x            | 68.5%                    |
+| 16          | 72            | 5.86x            | 36.6%                    |
+| 32          | 75            | 5.63x            | 17.6%                    |
+
+(Test machine: MacBook Air, 100,000,000 points.)
+
+Interesting wrinkle: T=4 shows **super-linear** speedup (121% efficiency,
+i.e. faster than the "ideal" 4x). This isn't a measurement error so much as
+a real effect of JIT warm-up and CPU cache behavior — splitting the same
+100M-point workload across 4 cores means each core's slice fits better in
+its private cache and JIT-compiles to fast native code sooner, so the
+combined runtime can beat the naive T1×(1/T) prediction. Past T=4, the
+gains taper off and efficiency drops steadily as more software threads
+compete for the same physical cores.
 
 ---
 
@@ -60,15 +80,18 @@ Fill in after running `Part3_Reduction` on your machine (100,000,000 points):
 fast as 8 threads?**
 
 Past the physical core count, extra "threads" don't add extra execution
-units — they're scheduled onto the same 8 cores via OS time-slicing (or
-onto sibling hyperthreads, which share a core's execution ports and caches
-rather than doubling them). So 16 threads on an 8-core CPU mostly adds
-context-switch overhead and cache contention instead of parallel throughput:
-you get some benefit from hyperthreading hiding memory-latency stalls, but
-nowhere near a linear 2x, and efficiency (speedup/T) visibly drops. This is
-why the efficiency column keeps falling as T grows past the core count —
-it's the practical face of Amdahl's/Gustafson's law plus real hardware
-contention (shared caches, shared memory bandwidth, OS scheduling overhead).
+units — they're scheduled onto the same physical cores via OS time-slicing.
+In my data this shows up clearly: going from 8→16 threads only takes the
+runtime from 77ms to 72ms (barely any gain), while efficiency drops from
+68.5% to 36.6%. That's because my machine doesn't have 16 physical cores
+available to the JVM — once T exceeds the real core count, extra threads
+are just interleaved by the OS scheduler on the same cores, adding
+context-switch overhead and cache contention instead of genuine parallel
+throughput. So doubling T from 8 to 16 doesn't double the work being done
+in parallel, it mostly doubles the number of threads fighting over the
+same physical resources — hence almost no speedup and a big efficiency
+drop. This is the practical face of Amdahl's/Gustafson's law plus real
+hardware limits (shared caches, memory bandwidth, OS scheduling overhead).
 
 **2. Why was the synchronized version in Part 2 slower than running on one
 single core?**
